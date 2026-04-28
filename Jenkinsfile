@@ -2,28 +2,19 @@ pipeline {
     agent any
 
     stages {
-
-        stage('Pull Code') {
+        stage('Checkout') {
             steps {
                 git branch: 'main', url: 'https://github.com/DINUANAND-R/Devops_Chart'
             }
         }
 
-        stage('Stop Old Containers') {
+        stage('Deploy with Docker Compose') {
             steps {
-                sh 'docker compose -f docker-compose.prod.yml down || true'
-            }
-        }
-
-        stage('Build & Deploy') {
-            steps {
-                sh 'docker compose -f docker-compose.prod.yml up -d --build'
-            }
-        }
-
-        stage('Verify') {
-            steps {
-                sh 'docker ps'
+                sh '''
+                docker compose -f docker-compose.prod.yml down
+                docker compose -f docker-compose.prod.yml up -d --build
+                docker ps
+                '''
             }
         }
     }
