@@ -1,0 +1,61 @@
+services:
+  mongodb:
+    image: mongo:6
+    container_name: nexchat-mongodb
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - nexchat-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: nexchat-redis
+    restart: always
+    networks:
+      - nexchat-net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nexchat-backend
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      MONGO_URI: mongodb://mongodb:27017/chatapp
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: prod_jwt_secret_change_this
+      JWT_REFRESH_SECRET: prod_refresh_secret_change_this
+      CLIENT_URL: http://13.53.52.239
+      BASE_URL: http://13.53.52.239:5000
+    ports:
+      - "5000:3000"
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - nexchat-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nexchat-frontend
+    restart: always
+    environment:
+      REACT_APP_API_URL: http://YOUR_EC2_PUBLIC_IP:5000
+      REACT_APP_SOCKET_URL: http://YOUR_EC2_PUBLIC_IP:5000
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - nexchat-net
+
+volumes:
+  mongo_data:
+
+networks:
+  nexchat-net:
