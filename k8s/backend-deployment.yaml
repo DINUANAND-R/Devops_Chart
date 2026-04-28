@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      containers:
+        - name: backend
+          image: devops-backend:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3000
+
+          env:
+            # ─── Server ─────────────────────────────
+            - name: PORT
+              value: "3000"
+
+            - name: NODE_ENV
+              value: "production"
+
+            # ─── MongoDB (Kubernetes Service) ──────
+            - name: MONGO_URI
+              value: "mongodb://mongodb-service:27017/chatapp"
+
+            # ─── Redis (Kubernetes Service) ────────
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+
+            # ─── JWT ───────────────────────────────
+            - name: JWT_SECRET
+              value: "mysecret"
+            - name: JWT_REFRESH_SECRET
+              value: "myrefreshsecret"
+
+            # ─── Client URL (Frontend) ─────────────
+            - name: CLIENT_URL
+              value: "http://localhost:30008"

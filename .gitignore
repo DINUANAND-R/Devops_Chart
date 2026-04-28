@@ -1,0 +1,32 @@
+# Root
+node_modules/
+.env
+*.log
+logs/
+uploads/
+
+# Frontend
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Backend
+backend/node_modules/
+backend/uploads/
+backend/logs/
+backend/.env
+
+# Docker
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Test artifacts
+coverage/
+*.test.js.snap
