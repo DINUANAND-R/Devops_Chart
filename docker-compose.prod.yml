@@ -28,8 +28,8 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: prod_jwt_secret_change_this
       JWT_REFRESH_SECRET: prod_refresh_secret_change_this
-      CLIENT_URL: http://13.53.52.239
-      BASE_URL: http://13.53.52.239:5000
+      CLIENT_URL: http://13.49.67.59
+      BASE_URL: http://13.49.67.59:5000
     ports:
       - "5000:3000"
     depends_on:
