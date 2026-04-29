@@ -1,0 +1,94 @@
+groups:
+  # ── NexChat Application Alerts ────────────────────────────────────────────────
+  - name: nexchat.application
+    interval: 30s
+    rules:
+
+      - alert: BackendDown
+        expr: up{job="nexchat-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NexChat backend is DOWN"
+          description: "The backend service has been unreachable for more than 1 minute."
+
+      - alert: HighErrorRate
+        expr: |
+          rate(http_requests_total{job="nexchat-backend", status=~"5.."}[5m])
+            /
+          rate(http_requests_total{job="nexchat-backend"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP 5xx error rate (>5%)"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      - alert: SlowResponseTime
+        expr: |
+          histogram_quantile(0.95,
+            rate(http_request_duration_seconds_bucket{job="nexchat-backend"}[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 response time > 2 seconds"
+          description: "95th percentile latency is {{ $value }}s."
+
+      - alert: HighMemoryUsage
+        expr: |
+          process_resident_memory_bytes{job="nexchat-backend"} > 500 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Backend memory usage > 500MB"
+          description: "Backend is using {{ $value | humanize1024 }}B of RAM."
+
+  # ── Redis Alerts ──────────────────────────────────────────────────────────────
+  - name: nexchat.redis
+    rules:
+
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is DOWN"
+
+      - alert: RedisHighMemory
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage > 85%"
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory."
+
+  # ── Host Alerts ───────────────────────────────────────────────────────────────
+  - name: nexchat.host
+    rules:
+
+      - alert: HighCPU
+        expr: |
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host CPU usage > 85%"
+          description: "CPU at {{ $value }}%."
+
+      - alert: HighDiskUsage
+        expr: |
+          (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+            / node_filesystem_size_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Disk usage > 85%"
+          description: "Disk at {{ $value | humanizePercentage }} on {{ $labels.mountpoint }}."

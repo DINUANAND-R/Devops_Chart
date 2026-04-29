@@ -1,61 +1,275 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NexChat — Production Docker Compose (Windows Docker Desktop compatible)
+# All secrets come from .env (never committed to git)
+# Usage:
+#   cp .env.example .env && edit .env   # fill real secrets
+#   docker compose -f docker-compose.prod.yml up -d
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
+
+  # ── MongoDB ──────────────────────────────────────────────────────────────────
   mongodb:
-    image: mongo:6
-    container_name: nexchat-mongodb
-    restart: always
+    image: mongo:7
+    container_name: nexchat-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: chatapp
     volumes:
       - mongo_data:/data/db
+      - mongo_config:/data/configdb
     networks:
       - nexchat-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 30s     # mongosh needs up to 20s on cold start — 5s was too low
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
+  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: nexchat-redis
-    restart: always
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
     networks:
       - nexchat-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 320M
 
+  # ── Backend ──────────────────────────────────────────────────────────────────
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ${IMAGE_PREFIX:-ghcr.io/dinuanand-r/nexchat}-backend:${IMAGE_TAG:-latest}
     container_name: nexchat-backend
-    restart: always
+    restart: unless-stopped
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      MONGO_URI: mongodb://mongodb:27017/chatapp
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: prod_jwt_secret_change_this
-      JWT_REFRESH_SECRET: prod_refresh_secret_change_this
-      CLIENT_URL: http://13.49.67.59
-      BASE_URL: http://13.49.67.59:5000
-    ports:
-      - "5000:3000"
-    depends_on:
-      - mongodb
-      - redis
+      NODE_ENV:               production
+      PORT:                   5000
+      MONGO_URI:              mongodb://mongodb:27017/chatapp
+      REDIS_URL:              redis://redis:6379
+      JWT_SECRET:             ${JWT_SECRET}
+      JWT_REFRESH_SECRET:     ${JWT_REFRESH_SECRET}
+      JWT_EXPIRES_IN:         15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      CLIENT_URL:             ${CLIENT_URL:-http://localhost}
+      BASE_URL:               ${BASE_URL:-http://localhost}
+      UPLOAD_DIR:             uploads
+      MAX_FILE_SIZE:          10485760
+    volumes:
+      - uploads_data:/app/uploads
+      - backend_logs:/app/logs
     networks:
       - nexchat-net
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
+  # ── Frontend ─────────────────────────────────────────────────────────────────
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: ${IMAGE_PREFIX:-ghcr.io/dinuanand-r/nexchat}-frontend:${IMAGE_TAG:-latest}
     container_name: nexchat-frontend
-    restart: always
-    environment:
-      REACT_APP_API_URL: http://YOUR_EC2_PUBLIC_IP:5000
-      REACT_APP_SOCKET_URL: http://YOUR_EC2_PUBLIC_IP:5000
+    restart: unless-stopped
+    networks:
+      - nexchat-net
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:80/nginx-health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+
+  # ── Nginx Reverse Proxy ───────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: nexchat-nginx
+    restart: unless-stopped
     ports:
       - "80:80"
-    depends_on:
-      - backend
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx_logs:/var/log/nginx
     networks:
       - nexchat-net
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
 
+  # ── node-exporter (host metrics) ──────────────────────────────────────────────
+  # Windows Docker Desktop: pid:host and /proc mounts are NOT supported
+  # node-exporter will expose Go runtime metrics only (no host CPU/disk)
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: nexchat-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    networks:
+      - nexchat-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+
+  # ── cAdvisor (container metrics) ─────────────────────────────────────────────
+  # Windows Docker Desktop: use docker socket only (no /sys /dev/disk mounts)
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:latest
+    container_name: nexchat-cadvisor
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - '--docker_only=true'
+      - '--housekeeping_interval=10s'
+      - '--disable_metrics=disk,diskIO,tcp,udp,percpu,sched,process'
+    ports:
+      - "8080:8080"
+    networks:
+      - nexchat-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+  # ── Redis Exporter ────────────────────────────────────────────────────────────
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: nexchat-redis-exporter
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    ports:
+      - "9121:9121"
+    networks:
+      - nexchat-net
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 32M
+
+  # ── Prometheus ────────────────────────────────────────────────────────────────
+  # No depends_on backend — Prometheus starts independently and scrapes targets
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nexchat-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - "9090:9090"
+    networks:
+      - nexchat-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ── Grafana ───────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nexchat-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER:     ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP:     "false"
+      GF_SERVER_ROOT_URL:         "%(protocol)s://%(domain)s:%(http_port)s/"
+      GF_INSTALL_PLUGINS:         "grafana-clock-panel"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - nexchat-net
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
 volumes:
   mongo_data:
+  mongo_config:
+  redis_data:
+  uploads_data:
+  backend_logs:
+  nginx_logs:
+  prometheus_data:
+  grafana_data:
 
+# ── Network ───────────────────────────────────────────────────────────────────
 networks:
   nexchat-net:
+    driver: bridge

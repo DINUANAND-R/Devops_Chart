@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb
+  namespace: nexchat
+  labels:
+    app: mongodb
+    app.kubernetes.io/component: database
+spec:
+  replicas: 1   # MongoDB is stateful — do not scale without replica set config
+  selector:
+    matchLabels:
+      app: mongodb
+  strategy:
+    type: Recreate   # Recreate for stateful workloads (avoids two writers)
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+        - name: mongodb
+          image: mongo:7
+          ports:
+            - containerPort: 27017
+
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: chatapp
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+
+          livenessProbe:
+            exec:
+              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 10
+
+          readinessProbe:
+            exec:
+              command: ["mongosh", "--eval", "db.adminCommand('ping')"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+
+          volumeMounts:
+            - name: mongo-data
+              mountPath: /data/db
+            - name: mongo-config
+              mountPath: /data/configdb
+
+      volumes:
+        - name: mongo-data
+          persistentVolumeClaim:
+            claimName: mongodb-data-pvc
+        - name: mongo-config
+          persistentVolumeClaim:
+            claimName: mongodb-config-pvc
