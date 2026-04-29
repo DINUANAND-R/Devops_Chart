@@ -33,7 +33,7 @@ const LoginPage = () => {
           <div className="auth-logo-text">Nex<span>Chat</span></div>
         </div>
         <h1 className="auth-title">Welcome back</h1>
-        <p className="auth-subtitle">Sign in to continue to NexChat</p>
+        <p className="auth-subtitle">Sign in to continue to NexChat!!</p>
 
         {error && <div className="auth-error">{error}</div>}
 
