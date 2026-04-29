@@ -3,8 +3,9 @@ apiVersion: 1
 datasources:
   - name: Prometheus
     type: prometheus
+    uid: prometheus          # Must match "uid" in dashboard JSON panels
     access: proxy
-    url: http://prometheus:9090
+    url: http://nexchat-prometheus:9090
     isDefault: true
     editable: false
     jsonData:

@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NexChat Jenkins — Custom image with Docker CLI pre-installed
+# Build:  docker build -f Dockerfile.jenkins -t nexchat-jenkins .
+# Run:    docker run -d --name nexchat-jenkins --restart unless-stopped \
+#           -p 8090:8080 -p 50000:50000 \
+#           -v jenkins-data:/var/jenkins_home \
+#           -v //var/run/docker.sock:/var/run/docker.sock \
+#           nexchat-jenkins
+# ─────────────────────────────────────────────────────────────────────────────
+FROM jenkins/jenkins:lts-jdk21
+
+USER root
+
+# Install Docker CLI so pipeline can run `docker build`, `docker compose`, etc.
+RUN apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends \
+        docker.io \
+        docker-compose-v2 \
+        curl \
+        jq && \
+    rm -rf /var/lib/apt/lists/*
+
+# Give jenkins user access to docker socket
+RUN usermod -aG docker jenkins
+
+# Switch back to jenkins user
+USER jenkins
+
+# Skip the setup wizard on first boot (optional — remove if you want the wizard)
+# ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
+
+EXPOSE 8080 50000
